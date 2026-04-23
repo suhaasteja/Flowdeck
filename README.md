@@ -5,6 +5,24 @@
 ![Flowdeck demo](docs/demo.gif)
 <!-- Record a 30s GIF: open app → click skill → robot moves → inject fault → diagnose -->
 
+## How it works
+
+When you run the app, two processes start: a React frontend and a Python robot simulator.
+
+The simulator runs a fake UR5 robot — it moves the arm's 6 joints in a continuous idle motion and broadcasts the joint positions to the browser 30 times per second over WebSocket. The browser receives each update and applies the angles directly to the 3D arm with no React re-renders in between, so it stays smooth at 60 FPS.
+
+**Clicking a skill block** (e.g. "Move to pick") sends a command to the Python backend. The backend smoothly moves the arm to that skill's target pose over ~2.5 seconds, then returns to idle. The block glows blue while the motion is running.
+
+**The telemetry panel** shows all 6 joint angles, TCP position, gripper state, and cycle count — updating live at 30 Hz.
+
+**Faults** fire automatically every ~45 seconds, or you can trigger one manually. When a fault occurs, a panel slides up from the bottom of the screen, the affected joint turns red in the 3D view, and you can click **Diagnose** — which calls the Claude API and streams back a structured diagnosis (likely causes, recommended actions, confidence level). Clicking **Acknowledge & Reset** clears it and returns the arm to home.
+
+**Kill the backend** and the arm freezes on its last position, the status indicator turns amber, and the UI shows a "Reconnecting…" banner. The frontend retries automatically with exponential backoff. Restart the backend and it reconnects on its own.
+
+**Reload the page with no network** and the app shell still loads from the service worker cache — the UI comes up with an "Offline" banner rather than a blank browser error.
+
+---
+
 ## What this is
 
 Intrinsic (Google's AI robotics group) builds **Flowstate** — a web-based IDE and digital twin for industrial robots. Their frontend role requires TypeScript, React, Three.js, real-time state management, gRPC/Protobuf, and offline-first PWA architecture.
