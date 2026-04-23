@@ -1,6 +1,7 @@
-import { Suspense } from 'react'
+import { Suspense, useRef } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
 import { MousePointer2, Move, RotateCcw, Maximize2, Camera } from 'lucide-react'
 import { WorkcellScene } from './WorkcellScene'
 import { RobotArm } from './RobotArm'
@@ -13,7 +14,30 @@ const TOOLBAR_BUTTONS = [
   { Icon: Camera,        label: 'Camera' },
 ]
 
+const debugMode = new URLSearchParams(window.location.search).has('debug')
+
+/** Measures FPS in useFrame and writes directly to a DOM span — zero React re-renders. */
+function FpsMeter({ spanRef }: { spanRef: React.RefObject<HTMLSpanElement> }) {
+  const frames = useRef(0)
+  const last   = useRef(performance.now())
+
+  useFrame(() => {
+    frames.current++
+    const now = performance.now()
+    if (now - last.current >= 500) {
+      const fps = Math.round(frames.current * 1000 / (now - last.current))
+      if (spanRef.current) spanRef.current.textContent = `${fps} FPS`
+      frames.current = 0
+      last.current = now
+    }
+  })
+
+  return null  // renders nothing into the canvas
+}
+
 export function Viewer3D() {
+  const fpsSpanRef = useRef<HTMLSpanElement>(null)
+
   return (
     <div className="flex-1 relative overflow-hidden">
 
@@ -40,6 +64,13 @@ export function Viewer3D() {
         </button>
       </div>
 
+      {/* FPS overlay — only when ?debug=1 */}
+      {debugMode && (
+        <div className="absolute top-2.5 right-5 z-10 bg-black/70 rounded-md px-2.5 py-1 pointer-events-none">
+          <span ref={fpsSpanRef} className="font-mono text-[11px] text-green-400">-- FPS</span>
+        </div>
+      )}
+
       {/* R3F Canvas */}
       <Canvas
         shadows
@@ -50,6 +81,7 @@ export function Viewer3D() {
         <Suspense fallback={null}>
           <WorkcellScene />
           <RobotArm />
+          {debugMode && <FpsMeter spanRef={fpsSpanRef} />}
           <OrbitControls
             target={[0, 0.7, 0]}
             enableDamping

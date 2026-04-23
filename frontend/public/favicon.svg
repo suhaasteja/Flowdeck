@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Dark background circle -->
+  <circle cx="16" cy="16" r="16" fill="#1a1a1a"/>
+  <!-- Robot arm silhouette (simplified UR5) -->
+  <!-- Base -->
+  <rect x="12" y="24" width="8" height="3" rx="1" fill="#6b8fea"/>
+  <!-- Lower arm -->
+  <rect x="14.5" y="15" width="3" height="10" rx="1.5" fill="#f0f0f2"/>
+  <!-- Elbow joint -->
+  <circle cx="16" cy="15" r="2.5" fill="#6b8fea"/>
+  <!-- Upper arm (angled) -->
+  <rect x="14" y="7" width="3" height="9" rx="1.5" fill="#f0f0f2" transform="rotate(-20 16 12)"/>
+  <!-- Wrist joint -->
+  <circle cx="19" cy="8" r="2" fill="#6b8fea"/>
+  <!-- Gripper -->
+  <rect x="20" y="5" width="1.5" height="5" rx="0.75" fill="#f0f0f2"/>
+  <rect x="22.5" y="5" width="1.5" height="5" rx="0.75" fill="#f0f0f2"/>
+</svg>

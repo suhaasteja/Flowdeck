@@ -1,3 +1,6 @@
+# Private context
+CONTEXT.md
+
 # Dependencies
 node_modules/
 .pnp
@@ -6,6 +9,7 @@ node_modules/
 # Build outputs
 frontend/dist/
 frontend/.vite/
+frontend/**/*.tsbuildinfo
 
 # Python
 backend/__pycache__/
