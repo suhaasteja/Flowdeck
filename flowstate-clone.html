@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Flowstate Clone</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 13px; color: #1a1a1a; background: #f5f5f7; overflow: hidden; }
+
+  /* --- Top bar --- */
+  .topbar { height: 44px; background: #fff; border-bottom: 1px solid #e5e5ea; display: flex; align-items: center; padding: 0 16px; gap: 16px; }
+  .topbar-title { font-weight: 600; }
+  .topbar-tabs { display: flex; gap: 4px; margin-left: 24px; }
+  .tab { padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+  .tab.active { background: #ececf0; font-weight: 500; }
+  .topbar-center { flex: 1; display: flex; justify-content: center; align-items: center; gap: 12px; }
+  .run-pill { display: flex; align-items: center; gap: 8px; background: #ececf0; border-radius: 20px; padding: 4px 14px; font-size: 12px; }
+  .run-dot { width: 8px; height: 8px; border-radius: 50%; background: #34c759; }
+  .topbar-right { display: flex; gap: 8px; }
+  .icon-btn { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #555; font-size: 14px; }
+  .icon-btn:hover { background: #ececf0; }
+
+  /* --- Main layout --- */
+  .layout { display: flex; height: calc(100% - 44px); }
+  .panel { background: #fff; }
+  .panel-header { padding: 10px 14px; font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #f0f0f3; display: flex; justify-content: space-between; align-items: center; }
+
+  /* Left panel - behavior tree */
+  .left-panel { width: 260px; border-right: 1px solid #e5e5ea; overflow-y: auto; }
+  .bt-section { padding: 8px 0; border-bottom: 1px solid #f0f0f3; }
+  .bt-section-title { padding: 6px 14px; font-size: 11px; color: #888; font-weight: 500; display: flex; align-items: center; gap: 6px; }
+  .bt-group { padding: 6px 14px; }
+  .bt-group-header { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 4px 0; cursor: pointer; }
+  .bt-group-header::before { content: "▾"; font-size: 9px; color: #888; }
+  .bt-block { background: #f7f7fa; border: 1px solid #e8e8ed; border-radius: 5px; padding: 7px 10px; margin: 4px 0 4px 14px; font-size: 11px; cursor: grab; transition: background 0.1s; }
+  .bt-block:hover { background: #eef0f7; border-color: #c8d1e8; }
+  .bt-block.active { background: #e0e9ff; border-color: #6b8fea; }
+  .bt-block-title { font-weight: 500; color: #1a1a1a; }
+  .bt-block-sub { font-size: 10px; color: #888; margin-top: 2px; font-family: ui-monospace, monospace; }
+
+  /* Center - 3D viewer */
+  .center-panel { flex: 1; position: relative; background: linear-gradient(to bottom, #fafbfe 0%, #eef0f5 100%); }
+  .viewer-tabs { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; padding: 3px; z-index: 10; }
+  .viewer-tab { padding: 5px 16px; font-size: 12px; border-radius: 6px; cursor: pointer; }
+  .viewer-tab.active { background: #1a1a1a; color: #fff; }
+  .viewer-toolbar { position: absolute; top: 10px; left: 20px; background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; padding: 4px; gap: 2px; z-index: 10; }
+  .viewer-toolbar .icon-btn { width: 26px; height: 26px; font-size: 12px; }
+  #three-canvas { width: 100%; height: 100%; display: block; }
+  .axis-gizmo { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 60px; height: 60px; background: #fff; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.1); display: flex; align-items: center; justify-content: center; font-size: 10px; color: #888; z-index: 10; }
+
+  /* Right panel */
+  .right-panel { width: 280px; border-left: 1px solid #e5e5ea; display: flex; flex-direction: column; }
+  .right-tabs { display: flex; border-bottom: 1px solid #e5e5ea; }
+  .right-tab { flex: 1; padding: 10px; text-align: center; font-size: 12px; cursor: pointer; color: #888; }
+  .right-tab.active { color: #1a1a1a; font-weight: 500; border-bottom: 2px solid #1a1a1a; }
+  .right-content { flex: 1; overflow-y: auto; padding: 8px 0; }
+  .scene-search { padding: 8px 14px; }
+  .scene-search input { width: 100%; padding: 6px 10px; border: 1px solid #e5e5ea; border-radius: 5px; font-size: 12px; outline: none; }
+  .scene-search input:focus { border-color: #6b8fea; }
+  .tree-item { padding: 3px 14px 3px 0; font-size: 12px; cursor: pointer; user-select: none; }
+  .tree-item:hover { background: #f7f7fa; }
+  .tree-item.selected { background: #e0e9ff; }
+  .tree-label { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+  .tree-caret { width: 12px; display: inline-block; font-size: 9px; color: #888; }
+  .tree-icon { width: 14px; color: #888; font-size: 11px; }
+  .indent-1 { padding-left: 14px; }
+  .indent-2 { padding-left: 30px; }
+  .indent-3 { padding-left: 46px; }
+  .indent-4 { padding-left: 62px; }
+
+  .right-section { padding: 8px 14px; border-top: 1px solid #f0f0f3; }
+  .right-section-header { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #666; text-transform: uppercase; font-weight: 600; padding: 4px 0; letter-spacing: 0.5px; }
+  .asset-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; cursor: pointer; }
+  .asset-row:hover { background: #f7f7fa; }
+  .asset-icon { width: 16px; height: 16px; background: #ececf0; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="topbar">
+  <div class="topbar-title">Challenge</div>
+  <div class="topbar-tabs">
+    <div class="tab active">Build</div>
+    <div class="tab">Execute</div>
+  </div>
+  <div class="topbar-center">
+    <div class="run-pill">
+      <div class="run-dot"></div>
+      <span>Executing on</span>
+      <strong>Simulation ▾</strong>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="icon-btn">◷</div>
+    <div class="icon-btn">☰</div>
+    <div class="icon-btn">⚙</div>
+  </div>
+</div>
+
+<!-- Main 3-pane layout -->
+<div class="layout">
+
+  <!-- Left: behavior tree -->
+  <div class="panel left-panel">
+    <div class="bt-section">
+      <div class="bt-section-title">▾ Initialize</div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ estimate_and_update_...</div>
+        <div class="bt-block-sub">pc_estimate_and_update</div>
+      </div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ set drop pose</div>
+        <div class="bt-block-sub">pc_update_world</div>
+      </div>
+    </div>
+
+    <div class="bt-section">
+      <div class="bt-section-title">▾ Place stock in vice</div>
+      <div class="bt-group">
+        <div class="bt-group-header">Pick stock</div>
+        <div class="bt-block active">
+          <div class="bt-block-title">▸ Plan grasp (pick)</div>
+          <div class="bt-block-sub">pc_plan_grasp</div>
+        </div>
+        <div class="bt-block">
+          <div class="bt-block-title">▸ Move to pick</div>
+          <div class="bt-block-sub">pc_move_robot</div>
+        </div>
+        <div class="bt-block">
+          <div class="bt-block-title">▸ Attach object to gripper</div>
+          <div class="bt-block-sub">pc_attach_object_to_robot</div>
+        </div>
+        <div class="bt-block">
+          <div class="bt-block-title">▸ Wait for 0.25s</div>
+          <div class="bt-block-sub">pc_sleep_for</div>
+        </div>
+        <div class="bt-block">
+          <div class="bt-block-title">▸ Retract (0.5m)</div>
+          <div class="bt-block-sub">pc_move_robot</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bt-section">
+      <div class="bt-section-title">▾ Approach</div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Approach CNC Machine</div>
+        <div class="bt-block-sub">pc_move_robot</div>
+      </div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Align stock in vice</div>
+        <div class="bt-block-sub">pc_move_robot</div>
+      </div>
+    </div>
+
+    <div class="bt-section">
+      <div class="bt-section-title">▾ Pre-insert grasp</div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Pre-insert</div>
+        <div class="bt-block-sub">pc_move_robot</div>
+      </div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Sensor-based control</div>
+        <div class="bt-block-sub">pc_move_to_contact</div>
+      </div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Insert to contact</div>
+        <div class="bt-block-sub">pc_move_to_contact</div>
+      </div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Detach object</div>
+        <div class="bt-block-sub">pc_detach_object</div>
+      </div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Retract 5cm</div>
+        <div class="bt-block-sub">pc_move_robot</div>
+      </div>
+      <div class="bt-block">
+        <div class="bt-block-title">▸ Move idle</div>
+        <div class="bt-block-sub">pc_move_robot</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Center: 3D viewer -->
+  <div class="panel center-panel">
+    <div class="viewer-toolbar">
+      <div class="icon-btn" title="Select">⬚</div>
+      <div class="icon-btn" title="Move">⊹</div>
+      <div class="icon-btn" title="Rotate">↻</div>
+      <div class="icon-btn" title="Scale">⇲</div>
+      <div class="icon-btn" title="Camera">◉</div>
+    </div>
+    <div class="viewer-tabs">
+      <div class="viewer-tab active">Build</div>
+      <div class="viewer-tab">Execute</div>
+    </div>
+    <canvas id="three-canvas"></canvas>
+    <div class="axis-gizmo">XYZ</div>
+  </div>
+
+  <!-- Right: scene tree + assets -->
+  <div class="panel right-panel">
+    <div class="right-tabs">
+      <div class="right-tab active">Scene</div>
+      <div class="right-tab">Resources</div>
+    </div>
+
+    <div class="scene-search">
+      <input type="text" placeholder="Search..." />
+    </div>
+
+    <div class="right-content">
+      <div class="tree-item">
+        <div class="tree-label"><span class="tree-caret">▾</span>📁 Scene</div>
+      </div>
+      <div class="tree-item indent-1">
+        <div class="tree-label"><span class="tree-caret">▸</span>📦 workcell</div>
+      </div>
+      <div class="tree-item indent-1 selected">
+        <div class="tree-label"><span class="tree-caret">▾</span>🤖 robot</div>
+      </div>
+      <div class="tree-item indent-2">
+        <div class="tree-label"><span class="tree-caret">▾</span>🔗 flange</div>
+      </div>
+      <div class="tree-item indent-3">
+        <div class="tree-label"><span class="tree-caret">▾</span>⚙ tool_0_frame_mount</div>
+      </div>
+      <div class="tree-item indent-4">
+        <div class="tree-label"><span class="tree-caret">▸</span>📷 camera_mount</div>
+      </div>
+      <div class="tree-item indent-4">
+        <div class="tree-label"><span class="tree-caret">▸</span>🔗 base_link</div>
+      </div>
+      <div class="tree-item indent-3">
+        <div class="tree-label"><span class="tree-caret">▾</span>⚙ flange</div>
+      </div>
+      <div class="tree-item indent-4">
+        <div class="tree-label"><span class="tree-caret">▾</span>🦾 robotiq_gripper</div>
+      </div>
+      <div class="tree-item indent-4" style="padding-left: 78px;">
+        <div class="tree-label"><span class="tree-caret">▸</span>⚙ tool</div>
+      </div>
+      <div class="tree-item indent-2">
+        <div class="tree-label"><span class="tree-caret">▸</span>📡 sensor</div>
+      </div>
+      <div class="tree-item indent-2">
+        <div class="tree-label"><span class="tree-caret">▸</span>💡 led</div>
+      </div>
+
+      <div class="right-section">
+        <div class="right-section-header">
+          <span>Installed Assets</span>
+          <span style="color:#6b8fea; cursor:pointer; text-transform:none; font-weight:500;">+ Install</span>
+        </div>
+        <div class="asset-row"><div class="asset-icon"></div>Hardware Drivers</div>
+        <div class="asset-row"><div class="asset-icon"></div>Skills</div>
+        <div class="asset-row"><div class="asset-icon"></div>Scene Objects</div>
+        <div class="asset-row"><div class="asset-icon"></div>Services</div>
+        <div class="asset-row"><div class="asset-icon"></div>Products</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Three.js -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const canvas = document.getElementById('three-canvas');
+const centerPanel = canvas.parentElement;
+
+// --- Scene setup ---
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xf2f4f8);
+scene.fog = new THREE.Fog(0xf2f4f8, 8, 20);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+camera.position.set(2.5, 2.0, 3.0);
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+function resize() {
+  const w = centerPanel.clientWidth;
+  const h = centerPanel.clientHeight;
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Lighting ---
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const key = new THREE.DirectionalLight(0xffffff, 1.0);
+key.position.set(4, 6, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.camera.left = -4;
+key.shadow.camera.right = 4;
+key.shadow.camera.top = 4;
+key.shadow.camera.bottom = -4;
+scene.add(key);
+
+const fill = new THREE.DirectionalLight(0xaaccff, 0.3);
+fill.position.set(-3, 2, -2);
+scene.add(fill);
+
+// --- Floor ---
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(20, 20),
+  new THREE.MeshStandardMaterial({ color: 0xdde2ec, roughness: 0.9 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+const grid = new THREE.GridHelper(20, 40, 0xbbc3d1, 0xd5dae3);
+grid.position.y = 0.001;
+scene.add(grid);
+
+// --- Workcell table ---
+const tableMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2e, roughness: 0.6, metalness: 0.2 });
+const table = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.1, 1.4), tableMat);
+table.position.set(0, 0.5, 0);
+table.castShadow = true;
+table.receiveShadow = true;
+scene.add(table);
+
+// table legs
+const legMat = new THREE.MeshStandardMaterial({ color: 0x1c1c20, roughness: 0.5 });
+for (const [x, z] of [[-1.05, -0.65], [1.05, -0.65], [-1.05, 0.65], [1.05, 0.65]]) {
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.5, 0.06), legMat);
+  leg.position.set(x, 0.25, z);
+  leg.castShadow = true;
+  scene.add(leg);
+}
+
+// frame (transparent enclosure uprights)
+const frameMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, transparent: true, opacity: 0.15, roughness: 0.3 });
+for (const [x, z] of [[-1.05, -0.65], [1.05, -0.65], [-1.05, 0.65], [1.05, 0.65]]) {
+  const up = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.8, 0.04), frameMat);
+  up.position.set(x, 1.45, z);
+  scene.add(up);
+}
+
+// --- Robot arm (simplified UR-style 6-DOF) ---
+const robot = new THREE.Group();
+robot.position.set(0.7, 0.55, 0);
+scene.add(robot);
+
+const armWhite = new THREE.MeshStandardMaterial({ color: 0xf0f0f2, roughness: 0.35, metalness: 0.1 });
+const armJoint = new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.4 });
+
+// Base
+const base = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.1, 0.08, 24), armJoint);
+base.position.y = 0.04;
+base.castShadow = true;
+robot.add(base);
+
+// Shoulder
+const shoulder = new THREE.Group();
+shoulder.position.y = 0.08;
+robot.add(shoulder);
+
+const shoulderJoint = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.12, 24), armWhite);
+shoulderJoint.rotation.z = Math.PI / 2;
+shoulderJoint.position.y = 0.05;
+shoulderJoint.castShadow = true;
+shoulder.add(shoulderJoint);
+
+// Upper arm
+const upperArm = new THREE.Group();
+upperArm.position.y = 0.05;
+shoulder.add(upperArm);
+
+const upperArmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.45, 20), armWhite);
+upperArmMesh.position.y = 0.22;
+upperArmMesh.castShadow = true;
+upperArm.add(upperArmMesh);
+
+// Elbow
+const elbow = new THREE.Group();
+elbow.position.y = 0.45;
+upperArm.add(elbow);
+
+const elbowJoint = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.11, 20), armJoint);
+elbowJoint.rotation.z = Math.PI / 2;
+elbowJoint.castShadow = true;
+elbow.add(elbowJoint);
+
+// Forearm
+const forearm = new THREE.Group();
+elbow.add(forearm);
+
+const forearmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.048, 0.38, 20), armWhite);
+forearmMesh.position.y = 0.19;
+forearmMesh.castShadow = true;
+forearm.add(forearmMesh);
+
+// Wrist 1
+const wrist1 = new THREE.Group();
+wrist1.position.y = 0.38;
+forearm.add(wrist1);
+
+const wrist1Mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.09, 18), armJoint);
+wrist1Mesh.rotation.z = Math.PI / 2;
+wrist1Mesh.castShadow = true;
+wrist1.add(wrist1Mesh);
+
+// Wrist 2
+const wrist2 = new THREE.Group();
+wrist2.position.y = 0.05;
+wrist1.add(wrist2);
+
+const wrist2Mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.08, 18), armWhite);
+wrist2Mesh.castShadow = true;
+wrist2.add(wrist2Mesh);
+
+// Wrist 3 / flange
+const flange = new THREE.Group();
+flange.position.y = 0.08;
+wrist2.add(flange);
+
+const flangeMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.05, 18), armJoint);
+flangeMesh.castShadow = true;
+flange.add(flangeMesh);
+
+// Gripper
+const gripperBase = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.08), armJoint);
+gripperBase.position.y = 0.05;
+gripperBase.castShadow = true;
+flange.add(gripperBase);
+
+const finger1 = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.08, 0.04), armJoint);
+finger1.position.set(0.035, 0.11, 0);
+finger1.castShadow = true;
+flange.add(finger1);
+
+const finger2 = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.08, 0.04), armJoint);
+finger2.position.set(-0.035, 0.11, 0);
+finger2.castShadow = true;
+flange.add(finger2);
+
+// Initial pose
+shoulder.rotation.y = -0.3;
+upperArm.rotation.x = -0.8;
+elbow.rotation.x = 1.4;
+wrist1.rotation.x = -0.6;
+wrist2.rotation.y = 0.3;
+
+// --- Target part on table (something to pick) ---
+const part = new THREE.Mesh(
+  new THREE.BoxGeometry(0.18, 0.015, 0.14),
+  new THREE.MeshStandardMaterial({ color: 0x4a7a5a, roughness: 0.5 })
+);
+part.position.set(-0.2, 0.56, 0);
+part.castShadow = true;
+part.receiveShadow = true;
+scene.add(part);
+
+// --- Camera frustum (purple cones) ---
+function addFrustum(x, y, z, tx, ty, tz) {
+  const geom = new THREE.ConeGeometry(0.35, 0.7, 4, 1, true);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xb080e0, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
+  const cone = new THREE.Mesh(geom, mat);
+  cone.position.set(x, y, z);
+  cone.lookAt(tx, ty, tz);
+  cone.rotateX(Math.PI / 2);
+  scene.add(cone);
+
+  // wireframe edges
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(geom),
+    new THREE.LineBasicMaterial({ color: 0x9060c0, transparent: true, opacity: 0.5 })
+  );
+  edges.position.copy(cone.position);
+  edges.rotation.copy(cone.rotation);
+  scene.add(edges);
+}
+addFrustum(0.4, 1.3, 0.1, -0.2, 0.56, 0);
+addFrustum(-0.5, 1.2, 0.3, -0.2, 0.56, 0);
+
+// --- Monitor / computer on table ---
+const monitorStand = new THREE.Mesh(
+  new THREE.BoxGeometry(0.04, 0.15, 0.04),
+  new THREE.MeshStandardMaterial({ color: 0x888888 })
+);
+monitorStand.position.set(-0.8, 0.63, -0.4);
+monitorStand.castShadow = true;
+scene.add(monitorStand);
+
+const monitor = new THREE.Mesh(
+  new THREE.BoxGeometry(0.4, 0.25, 0.02),
+  new THREE.MeshStandardMaterial({ color: 0x1a1a1a })
+);
+monitor.position.set(-0.8, 0.82, -0.4);
+monitor.rotation.y = 0.3;
+monitor.castShadow = true;
+scene.add(monitor);
+
+const keyboard = new THREE.Mesh(
+  new THREE.BoxGeometry(0.28, 0.015, 0.1),
+  new THREE.MeshStandardMaterial({ color: 0x2a2a2a })
+);
+keyboard.position.set(-0.8, 0.56, -0.25);
+keyboard.castShadow = true;
+scene.add(keyboard);
+
+// --- Controls ---
+const controls = new OrbitControls(camera, canvas);
+controls.target.set(0, 0.7, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+controls.minDistance = 1.5;
+controls.maxDistance = 8;
+
+// --- Animation ---
+let t = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  t += 0.005;
+
+  // gentle joint motion to suggest "executing"
+  shoulder.rotation.y = -0.3 + Math.sin(t) * 0.15;
+  upperArm.rotation.x = -0.8 + Math.sin(t * 0.7) * 0.1;
+  elbow.rotation.x = 1.4 + Math.sin(t * 0.9) * 0.1;
+  wrist2.rotation.y = 0.3 + Math.sin(t * 1.3) * 0.2;
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// --- Simple tab interactivity ---
+document.querySelectorAll('.viewer-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.viewer-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+document.querySelectorAll('.right-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.right-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+document.querySelectorAll('.bt-block').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.bt-block').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+  });
+});
+</script>
+
+</body>
+</html>
