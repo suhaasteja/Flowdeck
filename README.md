@@ -2,8 +2,9 @@
 
 > A browser-based Human-Machine Interface for a simulated UR5 robot arm — built as a portfolio artifact demonstrating the full Intrinsic Flowstate engineering stack.
 
-![Flowdeck demo](docs/demo.gif)
-<!-- Record a 30s GIF: open app → click skill → robot moves → inject fault → diagnose -->
+## Flowdeck demo
+
+https://github.com/user-attachments/assets/b6bf8a31-2258-4489-80f4-77ce18caf8db
 
 ## How it works
 
