@@ -10,13 +10,13 @@ https://github.com/user-attachments/assets/b6bf8a31-2258-4489-80f4-77ce18caf8db
 
 When you run the app, two processes start: a React frontend and a Python robot simulator.
 
-The simulator runs a fake UR5 robot — it moves the arm's 6 joints in a continuous idle motion and broadcasts the joint positions to the browser 30 times per second over WebSocket. The browser receives each update and applies the angles directly to the 3D arm with no React re-renders in between, so it stays smooth at 60 FPS.
+The simulator runs a fake UR5 robot — it moves the arm's 6 joints in a continuous idle motion and broadcasts the joint positions to the browser 30 times per second over WebSocket as **Protobuf binary frames**. The browser decodes each frame, computes the TCP pose locally via a **Rust/WASM forward kinematics solver**, and applies the angles directly to the 3D arm with no React re-renders in between — staying smooth at 60 FPS.
 
-**Clicking a skill block** (e.g. "Move to pick") sends a command to the Python backend. The backend smoothly moves the arm to that skill's target pose over ~2.5 seconds, then returns to idle. The block glows blue while the motion is running.
+**Clicking a skill block** (e.g. "Pick stock") sends a command to the Python backend. The backend uses **`roboticstoolbox-python` inverse kinematics** to solve the arm's joint angles for the target Cartesian pose, then plays back a multi-phase trajectory (approach → grasp → lift → place) at 100 Hz. The block glows blue while the motion runs.
 
-**The telemetry panel** shows all 6 joint angles, TCP position, gripper state, and cycle count — updating live at 30 Hz.
+**The telemetry panel** shows all 6 joint angles, TCP position (computed in-browser via WASM FK), gripper state, and cycle count — updating live at 30 Hz.
 
-**Faults** fire automatically every ~45 seconds, or you can trigger one manually. When a fault occurs, a panel slides up from the bottom of the screen, the affected joint turns red in the 3D view, and you can click **Diagnose** — which calls the Claude API and streams back a structured diagnosis (likely causes, recommended actions, confidence level). Clicking **Acknowledge & Reset** clears it and returns the arm to home.
+**Faults** fire automatically every ~45 seconds, or you can trigger one manually. When a fault occurs, a panel slides up from the bottom of the screen, the affected joint pulses with a **GLSL shader** (breathing red glow + rim lighting, running entirely on the GPU), and you can click **Diagnose** — which calls the Claude API and streams back a structured diagnosis (likely causes, recommended actions, confidence level). Clicking **Acknowledge & Reset** clears it and returns the arm to home.
 
 **Kill the backend** and the arm freezes on its last position, the status indicator turns amber, and the UI shows a "Reconnecting…" banner. The frontend retries automatically with exponential backoff. Restart the backend and it reconnects on its own.
 
@@ -37,10 +37,12 @@ Every feature maps directly to a bullet in the JD:
 | TypeScript + React | `frontend/src/` — strict mode throughout |
 | Three.js / WebGL | `Viewer3D.tsx`, `RobotArm.tsx`, `WorkcellScene.tsx` |
 | Real-time state management | Zustand store + direct `THREE.Object3D` mutation at 30 Hz |
-| WebSocket + Protobuf | FastAPI WS + JSON (same schema as proto sketch in PRD) |
+| WebSocket + Protobuf | FastAPI WS + Protobuf binary frames (`proto/robot.proto`) |
 | Service workers / offline-first | Vite PWA plugin (Workbox), `?debug=1` FPS overlay |
 | AI agent integration | Claude API streaming diagnosis modal |
-| Python backend | FastAPI + asyncio robot simulator |
+| Python backend | FastAPI + asyncio robot simulator + IK via `roboticstoolbox-python` |
+| WebAssembly + Rust | `wasm-fk/` Rust crate — FK solver compiled to WASM, runs in browser |
+| GLSL shaders | `faultHighlight.ts` — pulsing fault glow + rim lighting on GPU |
 
 ---
 
@@ -49,21 +51,25 @@ Every feature maps directly to a bullet in the JD:
 ```
 ┌──────────────────────┐        WebSocket          ┌──────────────────────┐
 │  Browser (React)     │◄─── joint states ─────────│  Python FastAPI      │
-│                      │    (JSON, 30 Hz)           │                      │
+│                      │   (Protobuf, 30 Hz)        │                      │
 │  Three.js / R3F      │                            │  asyncio robot sim   │
-│  Behavior tree UI    │──── skill commands ───────►│  trajectory player   │
+│  Behavior tree UI    │──── skill commands ───────►│  IK trajectory player│
 │  Telemetry panel     │                            │  fault injector      │
 │  Fault panel         │                            └──────────┬───────────┘
 │  Diagnosis modal     │◄────── SSE stream ──────────────────┘
-│  Service worker      │    /diagnose endpoint        Anthropic API (Claude)
+│  WASM FK solver      │    /diagnose endpoint        Anthropic API (Claude)
+│  GLSL fault shader   │
+│  Service worker      │
 └──────────────────────┘
 ```
 
 **Key architectural decisions:**
 
 - **Direct `THREE.Object3D` mutation in `useFrame`** (not React state) for joint updates — avoids React reconciler overhead at 30 Hz. The Zustand store is read via `getState()` (not `useStore()`) inside `useFrame` to prevent re-renders.
-- **Raw WebSocket + JSON** over gRPC-Web — simpler for a single stream; in production I'd swap to gRPC-Web (closer to the JD) and document the tradeoff.
-- **Vite over Bazel** — right-sized for weekend scope. A production Intrinsic deployment would use Bazel for hermetic builds and remote caching across a monorepo.
+- **Protobuf binary WebSocket** over gRPC-Web — typed wire format with `proto/robot.proto`; in production I'd layer gRPC-Web on top for bidirectional streaming and HTTP/2 multiplexing.
+- **TCP pose computed in browser** via Rust/WASM FK — the backend only sends raw joint angles; the browser runs the DH-parameter chain locally with zero network round-trip.
+- **GLSL fault shader** — fault highlight is a GPU program (`uTime` uniform + rim lighting), not a CPU material swap. Zero JS overhead at 60 FPS.
+- **Vite over Bazel** — right-sized for portfolio scope. A production Intrinsic deployment would use Bazel for hermetic builds and remote caching across a monorepo.
 
 ---
 
@@ -75,9 +81,12 @@ Every feature maps directly to a bullet in the JD:
 | Framework | React 18 | JD lists React; widest ecosystem for 3D + testing |
 | Build | Vite | Fast DX; Bazel migration path documented above |
 | 3D engine | Three.js + React Three Fiber | JD calls out Three.js; R3F makes 3D composable in React |
+| Shaders | GLSL (ShaderMaterial) | GPU-side fault highlight — pulsing glow + rim lighting via `uTime` uniform |
 | State | Zustand | Minimal boilerplate; `getState()` pattern avoids render overhead at 30 Hz |
+| Wire format | Protobuf (`proto/robot.proto`) | Typed binary frames; matches gRPC schema discipline from JD |
+| WASM | Rust + wasm-bindgen | UR5 FK solver in browser — DH-parameter chain, zero network round-trip |
+| IK | roboticstoolbox-python | Cartesian target → joint angles; multi-phase pick-and-place trajectories |
 | Styling | Tailwind CSS | Fast iteration; consistent design tokens |
-| Icons | Lucide React | Clean, industrial aesthetic |
 | Offline | Vite PWA (Workbox) | JD: "service workers / offline-first architecture" |
 | Testing | Vitest + RTL | Co-located with Vite; no separate Jest config |
 | Backend | FastAPI + asyncio | JD: "read Python backend code"; built-in WebSocket; async sim loop |
@@ -117,12 +126,21 @@ Clicking a skill block sends a `SkillCommand` over WebSocket. The backend interp
 ### Real-time telemetry
 Six joint angles (rad + °), TCP pose (x/y/z + rx/ry/rz), gripper state, cycle count — all updating at 30 Hz via direct Zustand store writes without triggering React re-renders in unrelated components.
 
+### IK pick-and-place
+Skills are defined as Cartesian target poses, not hand-tuned joint angles. The backend solves inverse kinematics via `roboticstoolbox-python` and plays back a multi-phase trajectory (approach → grasp → lift → move → place) at 100 Hz. Gripper state syncs through the Protobuf stream.
+
+### Protobuf binary transport
+All WebSocket frames are encoded with `proto/robot.proto` — generated TypeScript and Python classes via `scripts/gen-proto.sh`. No JSON on the wire; binary frames are visible in DevTools → Network → WS.
+
+### Rust/WASM forward kinematics
+TCP pose is computed in the browser by a Rust function compiled to WebAssembly (`wasm-fk/`). The backend only sends raw joint angles — the browser runs the UR5 DH-parameter chain locally at 30 Hz with zero network round-trip. FK compute time logs to console at `~0.08ms`.
+
 ### AI fault diagnosis
 When a fault fires (randomly every ~45s, or via `curl -X POST localhost:8000/admin/inject-fault`):
-- The affected joint turns red in the 3D view
+- The affected joint pulses with a GLSL shader — breathing red glow + rim lighting, entirely on the GPU
 - A fault panel slides up with code, message, and timestamp
 - Clicking **Diagnose** streams a structured Claude response (likely causes → recommended actions → confidence)
-- **Acknowledge & Reset** clears the fault and returns the arm to home
+- **Acknowledge & Reset** clears the shader and returns the arm to home
 
 ### Offline-first PWA
 The app shell, JS chunks, and CSS are precached via Workbox on first load. Killing the backend or going offline: the app still loads from cache with an appropriate banner. The robot's last known state remains visible.
@@ -166,12 +184,12 @@ CI runs on every push via GitHub Actions (`.github/workflows/ci.yml`): typecheck
 
 | Feature | Why |
 |---|---|
-| **gRPC-Web transport** | Closer to the JD; typed contracts, bidirectional streaming, browser-compatible |
-| **Real UR5 URDF + STL meshes** | `urdf-loader` integration is scaffolded; `scripts/download-urdf.sh` fetches and expands the ROS URDF |
-| **Rust/WASM FK solver** | Replace the rough Python FK approximation with a deterministic solver compiled to WASM — runs in the browser at native speed |
-| **Bazel migration** | Hermetic builds, remote caching, shared `proto/` package across frontend and backend without scripts |
-| **ROS 2 driver** | Swap the Python sim for a real `ros2_control` interface — the WebSocket protocol stays identical |
+| **gRPC-Web transport** | Layer gRPC-Web on top of the existing Protobuf schema — HTTP/2 multiplexing, bidirectional streaming, browser-native cancellation |
+| **Real UR5 URDF + STL meshes** | `urdf-loader` integration is scaffolded; blocked by `xacro` dependency in the ROS URDF package |
+| **Bazel migration** | Hermetic builds, remote caching, shared `proto/` package across frontend and backend without shell scripts |
+| **ROS 2 driver** | Swap the Python sim for a real `ros2_control` interface — the Protobuf WebSocket protocol stays identical |
 | **Scene tree → 3D highlight** | Clicking a node in the right panel selects the corresponding `THREE.Object3D` |
+| **"Ask follow-up" in Diagnosis Modal** | Multi-turn Claude conversation anchored to the active fault context |
 
 ---
 
