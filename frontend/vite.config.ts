@@ -43,6 +43,7 @@ export default defineConfig({
     port: 5173,
   },
   build: {
+    target: 'esnext', // top-level await required by wasm-bindgen output
     chunkSizeWarningLimit: 800,
     rollupOptions: {
       output: {
