@@ -1,5 +1,11 @@
 // WebSocket client with exponential-backoff reconnect
 // Delays: 1s → 2s → 4s → 8s → 16s → 30s (max)
+//
+// Wire format: Protobuf binary frames (ServerMessage / ClientMessage).
+// The internal WsMessage type is the same discriminated shape as before —
+// all encoding/decoding is contained in this module.
+
+import { robot } from '../proto/robot.js'
 
 export type WsMessage = Record<string, unknown>
 
@@ -20,16 +26,30 @@ export class RobotWsClient {
   connect() {
     if (this.stopped) return
     this.ws = new WebSocket(this.url)
+    this.ws.binaryType = 'arraybuffer'
 
     this.ws.onopen = () => {
       this.attempt = 0
       this.cb.onOpen()
     }
 
-    this.ws.onmessage = (ev: MessageEvent<string>) => {
+    this.ws.onmessage = (ev: MessageEvent<ArrayBuffer>) => {
       try {
-        const msg = JSON.parse(ev.data) as WsMessage
-        this.cb.onMessage(msg)
+        const bytes = new Uint8Array(ev.data)
+        const decoded = robot.ServerMessage.decode(bytes)
+
+        switch (decoded.payload) {
+          case 'state':
+            this.cb.onMessage({ type: 'state', payload: decoded.state })
+            break
+          case 'fault':
+            this.cb.onMessage({ type: 'fault', payload: decoded.fault })
+            break
+          case 'faultCleared':
+            this.cb.onMessage({ type: 'fault_cleared' })
+            break
+          // unknown payload — ignore
+        }
       } catch {
         // malformed frame — ignore
       }
@@ -49,9 +69,25 @@ export class RobotWsClient {
   }
 
   send(msg: WsMessage) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg))
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+
+    const type = msg['type'] as string
+    let props: robot.IClientMessage
+
+    if (type === 'skill') {
+      const payload = msg['payload'] as { skillId: string }
+      props = { skill: { skillId: payload.skillId } }
+    } else if (type === 'e_stop') {
+      props = { eStop: {} }
+    } else {
+      // 'reset' and any other client messages
+      props = { reset: {} }
     }
+
+    const bytes = robot.ClientMessage.encode(
+      robot.ClientMessage.create(props)
+    ).finish()
+    this.ws.send(bytes)
   }
 
   close() {

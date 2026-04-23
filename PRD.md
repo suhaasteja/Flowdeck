@@ -454,6 +454,44 @@ The README is the single most important deliverable. It must include:
 
 ---
 
+### Stage 8 — Inverse kinematics pick-and-place
+
+- Skills are defined as Cartesian target poses (x/y/z position in the workcell) rather than hardcoded joint angles
+- `roboticstoolbox-python` UR5 model solves IK — given a target position, it computes the correct joint angles automatically
+- Each skill plays a multi-phase trajectory: approach → grasp → lift → move → place, with gripper open/close timed to each phase
+- Arm visibly reaches to the part on the table, closes the gripper, lifts, moves to the target, and places
+- Gripper state synced in `RobotState` — telemetry panel shows open/closed in real time
+- If the part position changes in the scene, the arm follows — motion is data-driven, not scripted
+
+### Stage 9 (3h) — Protobuf binary transport
+
+- `proto/robot.proto` defines all message types: `JointState`, `TcpPose`, `RobotState`, `SkillCommand`, `Fault`, `ServerMessage`, `ClientMessage`
+- `scripts/gen-proto.sh` generates TypeScript classes into `frontend/src/proto/` and Python classes into `backend/proto/`
+- Backend sends binary WebSocket frames (Protobuf-encoded) instead of JSON strings
+- Frontend parses binary frames via `protobuf-ts` — same Zustand store, same UI, zero visible change to the operator
+- Skill commands sent from browser to backend are also Protobuf-encoded
+- All existing tests updated to use binary Protobuf frames; wire format confirmed correct in CI
+- README architecture diagram updated: "Protobuf binary, 30 Hz"
+
+### Stage 10 (4h) — Rust/WASM forward kinematics
+
+- `wasm-fk/` Rust crate implements UR5 forward kinematics using DH parameters — takes 6 joint angles, returns TCP pose (x/y/z + rx/ry/rz)
+- `wasm-pack build` compiles the crate to a `.wasm` binary + auto-generated TypeScript bindings
+- Browser loads the WASM module once on startup; `computeTcp()` is called inside `useFrame` every frame — no network round-trip, no Python involved
+- TCP pose in the telemetry panel is now computed locally in the browser in <0.1 ms
+- Backend no longer sends TCP pose in WebSocket messages — only raw joint angles
+- `scripts/build-wasm.sh` automates the build; CI caches the Cargo registry between runs
+
+### Stage 11 (2h) — GLSL fault highlight shader
+
+- When a fault fires, the affected joint no longer just turns red — it pulses with a breathing glow effect written in GLSL (a fragment shader running on the GPU)
+- Shader reads a `uTime` uniform ticked every frame via `useFrame` and a `uFaulted` uniform driven by the Zustand fault store
+- Rim-lighting effect highlights the edges of the faulted joint using the surface normal vs. camera angle
+- All other joints keep the default Three.js material; shader is swapped back on fault clear
+- No React state involved in the animation — uniform updates happen via direct ref mutation at 60 Hz
+
+---
+
 ## 13. Definition of Done
 
 A person who has never seen this project can:

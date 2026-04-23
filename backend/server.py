@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from robot_sim import RobotSim
 from diagnose import stream_diagnosis
+from proto import robot_pb2
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s  %(message)s")
 log = logging.getLogger(__name__)
@@ -43,6 +44,48 @@ app.add_middleware(
 
 
 # ------------------------------------------------------------------ #
+#  Dict → ServerMessage binary                                         #
+# ------------------------------------------------------------------ #
+
+def _encode_server_msg(msg: dict) -> bytes:
+    """Convert the sim's dict payload to a Protobuf-encoded ServerMessage."""
+    server_msg = robot_pb2.ServerMessage()
+    msg_type = msg.get("type")
+
+    if msg_type == "state":
+        payload = msg["payload"]
+        j = payload["joints"]
+
+        state = robot_pb2.RobotState(
+            status=payload["status"],
+            cycle_count=payload["cycleCount"],
+            current_skill=payload["currentSkill"],
+        )
+        state.joints.positions[:] = j["positions"]
+        state.joints.velocities[:] = j["velocities"]
+        state.joints.efforts[:] = j["efforts"]
+        state.joints.gripper_closed = j["gripperClosed"]
+        # tcp is intentionally omitted — the browser computes it via WASM FK
+        server_msg.state.CopyFrom(state)
+
+    elif msg_type == "fault":
+        payload = msg["payload"]
+        fault = robot_pb2.Fault(
+            id=payload["id"],
+            code=payload["code"],
+            message=payload["message"],
+            joint_index=payload["jointIndex"],
+            timestamp=payload["timestamp"],
+        )
+        server_msg.fault.CopyFrom(fault)
+
+    elif msg_type == "fault_cleared":
+        server_msg.fault_cleared.CopyFrom(robot_pb2.FaultCleared())
+
+    return server_msg.SerializeToString()
+
+
+# ------------------------------------------------------------------ #
 #  WebSocket endpoint                                                   #
 # ------------------------------------------------------------------ #
 
@@ -52,29 +95,29 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     log.info("Client connected")
 
     async def send_fn(msg: dict) -> None:
-        await ws.send_text(json.dumps(msg))
+        await ws.send_bytes(_encode_server_msg(msg))
 
     sim.add_client(send_fn)
     try:
-        async for raw in ws.iter_text():
+        async for raw in ws.iter_bytes():
             try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
+                client_msg = robot_pb2.ClientMessage()
+                client_msg.ParseFromString(raw)
+            except Exception:
                 continue
 
-            mtype = msg.get("type")
-            payload = msg.get("payload", {})
+            which = client_msg.WhichOneof("payload")
 
-            if mtype == "skill":
-                skill_id = payload.get("skillId", "")
+            if which == "skill":
+                skill_id = client_msg.skill.skill_id
                 log.info("Skill command: %s", skill_id)
                 await sim.execute_skill(skill_id)
 
-            elif mtype == "e_stop":
+            elif which == "e_stop":
                 log.warning("E-STOP received")
                 await sim.e_stop()
 
-            elif mtype == "reset":
+            elif which == "reset":
                 log.info("Reset received")
                 await sim.reset()
                 # Notify all clients that fault is cleared

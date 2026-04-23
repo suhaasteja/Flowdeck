@@ -149,9 +149,81 @@ cd backend && uv run pytest
 
 ---
 
+## Stage 8 — Inverse Kinematics Pick-and-Place
+**Goal:** Skills become real robot motions — the arm reaches to actual 3D positions using IK, closes the gripper, lifts the part, and places it. No more hand-tuned joint angle guesses.
+
+**What to run:** Same two terminals as Stage 7.
+
+**What you should see:**
+- Click "Pick stock" — arm swings out, reaches down to the part on the table, gripper closes, arm lifts back up
+- Click "Place in vice" — arm moves to the vice position, gripper opens, part is placed
+- Click "Return home" — arm returns to neutral pose
+- Telemetry status cycles `IDLE` → `MOVING` → `IDLE` through each phase
+- Gripper state in telemetry panel toggles open/closed in sync with the motion
+- Motion looks natural — smooth interpolation through approach, grasp, lift, move, place waypoints
+
+**Tech delivered:** `roboticstoolbox-python` UR5 model + IK solver, skill definitions as Cartesian target poses (not joint angles), multi-phase trajectory playback (approach → grasp → lift → move → place), gripper state synced through `RobotState`.
+
+---
+
+## Stage 9 — Protobuf Binary Transport
+**Goal:** Replace JSON WebSocket messages with real Protobuf binary frames. App behavior stays identical — this is a wire-format upgrade that closes the gRPC/Protobuf gap in the JD.
+
+**What to run:**
+```bash
+./scripts/gen-proto.sh   # generates TS + Python classes from proto/robot.proto
+npm run dev
+cd backend && uv run python server.py
+```
+
+**What you should see:**
+- App looks and works exactly the same as Stage 7 — no visible change to the operator
+- In browser DevTools → Network → WS: messages are now binary frames (not readable JSON strings)
+- All telemetry, skill commands, and fault messages flow correctly through Protobuf encoding
+- `npm run test` and `pytest` still pass — test fixtures updated to use binary frames
+
+**Tech delivered:** `proto/robot.proto` schema, `scripts/gen-proto.sh` codegen (protobuf-ts for frontend, grpcio-tools for backend), binary WebSocket send/receive in `server.py` and `useRobotStream.ts`, updated tests.
+
+---
+
+## Stage 10 — Rust/WASM Forward Kinematics
+**Goal:** Move TCP pose computation from Python backend into the browser via a Rust function compiled to WebAssembly. The browser calculates the arm's end-effector position locally — no network round-trip needed.
+
+**What to run:**
+```bash
+./scripts/build-wasm.sh   # compiles Rust → .wasm + TS bindings into frontend/public/wasm/
+npm run dev
+cd backend && uv run python server.py
+```
+
+**What you should see:**
+- Telemetry panel TCP pose (x/y/z, rx/ry/rz) still updates at 30 Hz — but it's now computed in the browser, not sent from the backend
+- Backend WebSocket messages no longer include a `tcp` field — only raw joint angles
+- Open browser console: `FK compute time: 0.08ms` logged each frame (or similar)
+- App still works fully offline (WASM module is cached by the service worker)
+
+**Tech delivered:** `wasm-fk/` Rust crate with UR5 DH-parameter FK math, `wasm-bindgen` JS bindings, `wasm-pack` build script, `frontend/src/lib/fk.ts` wrapper, `useFrame` integration, CI step caching Cargo registry.
+
+---
+
+## Stage 11 — GLSL Fault Highlight Shader
+**Goal:** Replace the plain red color swap on fault with a custom GPU shader — a pulsing glow effect written in GLSL that runs entirely on the GPU.
+
+**What to run:** Same two terminals as Stage 9.
+
+**What you should see:**
+- Trigger a fault (`curl -X POST localhost:8000/admin/inject-fault`)
+- The faulted joint now pulses with a breathing red glow (brightens and dims ~4× per second) instead of a static color change
+- Edges of the faulted joint are rim-lit — they glow brighter when viewed at a glancing angle
+- All other joints look completely normal
+- Clicking "Acknowledge & Reset" clears the shader and returns the joint to its default appearance
+- FPS stays at 60 — shader runs on GPU with zero CPU overhead
+
+**Tech delivered:** `frontend/src/shaders/faultHighlight.glsl` (vertex + fragment shaders), `<shaderMaterial>` in R3F with `uTime` and `uFaulted` uniforms, `useFrame` uniform tick via direct ref (no React state), README GPU pipeline section.
+
+---
+
 ## Stretch (post-weekend, if time)
 - Scene tree node → 3D highlight link
 - "Ask follow-up" in Diagnosis Modal
-- Rust/WASM FK solver module (replaces Python FK, runs in browser)
-- gRPC-Web transport (document trade-off vs raw WS)
 - Deploy: Vercel (frontend) + Fly.io (backend)

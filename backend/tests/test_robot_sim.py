@@ -5,54 +5,86 @@ import time
 
 import pytest
 
-from robot_sim import HOME, RobotSim, Trajectory
+from robot_sim import HOME, RobotSim, MultiPhaseTraj, Phase
 
 
 # ------------------------------------------------------------------ #
-#  Trajectory interpolation                                            #
+#  MultiPhaseTraj interpolation                                        #
 # ------------------------------------------------------------------ #
 
-class TestTrajectory:
+class TestMultiPhaseTraj:
+    def _make(self, start, end, duration=2.0):
+        """Helper: single-phase traj from start → end over duration."""
+        traj = MultiPhaseTraj(
+            phases=[Phase(joints=end, duration=duration)],
+            skill_id="test",
+        )
+        traj.begin(start)
+        return traj
+
     def test_at_t0_returns_start(self):
-        traj = Trajectory(start=[0.0] * 6, end=[1.0] * 6, duration=2.0)
-        traj.started_at = time.monotonic()
-        pos, done = traj.sample(traj.started_at)
-        for v in pos:
+        start = [0.0] * 6
+        traj = self._make(start, [1.0] * 6, duration=2.0)
+        positions, _, done = traj.sample(traj._phase_started)
+        for v in positions:
             assert abs(v) < 0.01
         assert not done
 
     def test_at_t1_returns_end(self):
-        traj = Trajectory(start=[0.0] * 6, end=[1.0] * 6, duration=2.0)
-        traj.started_at = time.monotonic() - 2.0  # already finished
-        pos, done = traj.sample(time.monotonic())
-        for v in pos:
+        end = [1.0] * 6
+        traj = self._make([0.0] * 6, end, duration=2.0)
+        positions, _, done = traj.sample(traj._phase_started + 2.0)
+        for v in positions:
             assert abs(v - 1.0) < 0.01
         assert done
 
     def test_midpoint_is_interpolated(self):
-        traj = Trajectory(start=[0.0] * 6, end=[2.0] * 6, duration=2.0)
-        traj.started_at = time.monotonic() - 1.0  # halfway
-        pos, done = traj.sample(time.monotonic())
-        # Ease-in-out: midpoint is exactly 0.5 * 2.0 = 1.0
-        for v in pos:
+        traj = self._make([0.0] * 6, [2.0] * 6, duration=2.0)
+        positions, _, done = traj.sample(traj._phase_started + 1.0)
+        # Cubic ease-in/out at t=0.5 → t_ease = 0.5²*(3-2*0.5) = 0.5
+        for v in positions:
             assert 0.9 < v < 1.1
         assert not done
 
     def test_duration_zero_returns_end_immediately(self):
-        traj = Trajectory(start=[0.0] * 6, end=[1.0] * 6, duration=0.001)
-        traj.started_at = time.monotonic() - 0.1
-        _, done = traj.sample(time.monotonic())
+        traj = self._make([0.0] * 6, [1.0] * 6, duration=0.001)
+        _, _, done = traj.sample(traj._phase_started + 0.1)
         assert done
 
     def test_six_joints_all_interpolated(self):
         start = [0.0, 1.0, -1.0, 0.5, -0.5, 0.2]
         end   = [1.0, 0.0,  1.0, 1.5,  0.5, 0.8]
-        traj  = Trajectory(start=start, end=end, duration=2.0)
-        traj.started_at = time.monotonic() - 2.0
-        pos, done = traj.sample(time.monotonic())
+        traj  = self._make(start, end, duration=2.0)
+        positions, _, done = traj.sample(traj._phase_started + 2.0)
         assert done
-        for got, exp in zip(pos, end):
+        for got, exp in zip(positions, end):
             assert abs(got - exp) < 0.01
+
+    def test_gripper_change_returned_on_phase_completion(self):
+        traj = MultiPhaseTraj(
+            phases=[Phase(joints=[1.0] * 6, duration=0.001, gripper_closed=True)],
+            skill_id="test",
+        )
+        traj.begin([0.0] * 6)
+        _, gripper, done = traj.sample(traj._phase_started + 0.1)
+        assert gripper is True
+        assert done
+
+    def test_multi_phase_sequences_correctly(self):
+        traj = MultiPhaseTraj(
+            phases=[
+                Phase(joints=[1.0] * 6, duration=0.001),
+                Phase(joints=[2.0] * 6, duration=0.001),
+            ],
+            skill_id="test",
+        )
+        traj.begin([0.0] * 6)
+        # Complete phase 0
+        _, _, done = traj.sample(traj._phase_started + 0.1)
+        assert not done  # phase 1 still pending
+        # Complete phase 1
+        _, _, done = traj.sample(traj._phase_started + 0.1)
+        assert done
 
 
 # ------------------------------------------------------------------ #
@@ -118,27 +150,30 @@ class TestFaultBuilding:
 
 
 # ------------------------------------------------------------------ #
-#  Approximate FK                                                     #
+#  Forward kinematics                                                  #
 # ------------------------------------------------------------------ #
 
-class TestApproxFK:
+class TestComputeTcp:
     def test_home_tcp_is_dict_with_keys(self):
         sim = RobotSim()
-        tcp = sim._approx_tcp()
+        tcp = sim._compute_tcp()
         assert {"x", "y", "z", "rx", "ry", "rz"} <= tcp.keys()
 
     def test_home_tcp_y_is_a_number(self):
-        """FK returns a numeric Y (approximate — uses visual angles not real UR5 DH)."""
         sim = RobotSim()
-        tcp = sim._approx_tcp()
+        tcp = sim._compute_tcp()
         assert isinstance(tcp["y"], float)
 
     def test_tcp_wrist_angles_match_joints(self):
+        # rx = sum of joints 1+2+3 (wrist tilt), ry = joint 4, rz = joint 5
         sim = RobotSim()
+        sim.positions[1] = 0.0
+        sim.positions[2] = 0.0
         sim.positions[3] = 0.42
         sim.positions[4] = -0.77
-        tcp = sim._approx_tcp()
-        assert abs(tcp["rx"] - 0.42) < 0.001
+        sim.positions[5] = 0.0
+        tcp = sim._compute_tcp()
+        assert abs(tcp["rx"] - 0.42) < 0.001   # tilt = 0+0+0.42
         assert abs(tcp["ry"] - (-0.77)) < 0.001
 
 

@@ -1,9 +1,11 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import wasm from 'vite-plugin-wasm'
 
 export default defineConfig({
   plugins: [
+    wasm(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -21,7 +23,7 @@ export default defineConfig({
       },
       workbox: {
         // Cache the app shell and all static assets
-        globPatterns: ['**/*.{js,css,html,svg,ico,woff,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,ico,woff,woff2,wasm}'],
         navigateFallback: 'index.html',
         // Cache URDF meshes if they exist
         runtimeCaching: [

@@ -2,11 +2,12 @@ import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useRobotStore } from '../store/robotStore'
+import { computeTcp } from '../lib/fk'
+import { faultShader } from '../shaders/faultHighlight'
 
 // Shared materials — created once, never re-allocated
-const armWhite  = new THREE.MeshStandardMaterial({ color: 0xf0f0f2, roughness: 0.35, metalness: 0.1 })
-const armJoint  = new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.4 })
-const armFault  = new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0xff3b30, emissiveIntensity: 0.4, roughness: 0.4 })
+const armWhite = new THREE.MeshStandardMaterial({ color: 0xf0f0f2, roughness: 0.35, metalness: 0.1 })
+const armJoint = new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.4 })
 
 // Axis mapping for each joint (which local rotation axis each UR5 joint drives)
 // J0: pan   → Y  |  J1: lift  → X  |  J2: elbow → X
@@ -34,18 +35,22 @@ export function RobotArm() {
     useRef<THREE.Mesh>(null), // J5 flange disc
   ]
 
-  // Drive joints + fault highlight directly from store — no React re-renders at 30 Hz
-  useFrame(() => {
-    const { robot, fault } = useRobotStore.getState()
+  // Drive joints + fault highlight directly from store — no React re-renders at 30 Hz.
+  useFrame((state) => {
+    const { robot, fault, setTcp } = useRobotStore.getState()
     const positions = robot.joints.positions
     const faultedJoint = fault?.jointIndex ?? -1
 
-    jointRefs.forEach((ref, i) => {
-      if (ref.current) ref.current.rotation[JOINT_AXES[i]] = positions[i] ?? 0
-    })
-    discRefs.forEach((ref, i) => {
-      if (ref.current) ref.current.material = faultedJoint === i ? armFault : armJoint
-    })
+    if (faultedJoint !== -1) faultShader.uniforms.uTime.value = state.clock.elapsedTime
+
+    for (let i = 0; i < 6; i++) {
+      const joint = jointRefs[i].current
+      const disc = discRefs[i].current
+      if (joint) joint.rotation[JOINT_AXES[i]] = positions[i] ?? 0
+      if (disc) disc.material = faultedJoint === i ? faultShader : armJoint
+    }
+
+    setTcp(computeTcp(positions))
   })
 
   return (

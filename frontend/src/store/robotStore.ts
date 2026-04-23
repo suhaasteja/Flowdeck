@@ -39,6 +39,7 @@ interface RobotStore {
 
   setConnection: (s: ConnectionStatus) => void
   setRobotState: (s: RobotState) => void
+  setTcp: (tcp: TcpPose) => void
   setFault: (f: Fault | null) => void
 }
 
@@ -67,6 +68,13 @@ export const useRobotStore = create<RobotStore>((set) => ({
   lastUpdateMs: 0,
 
   setConnection: (connection) => set({ connection }),
-  setRobotState: (robot) => set({ robot, lastUpdateMs: Date.now() }),
+  setRobotState: (robot) => set((s) => ({
+    // tcp is intentionally absent from the backend protobuf message (computed
+    // locally by WASM FK in useFrame). Preserve the last store value so
+    // TelemetryPanel never sees null while the first frame hasn't fired yet.
+    robot: { ...robot, tcp: (robot.tcp as TcpPose | null) ?? s.robot.tcp },
+    lastUpdateMs: Date.now(),
+  })),
+  setTcp: (tcp) => set((s) => ({ robot: { ...s.robot, tcp } })),
   setFault: (fault) => set({ fault }),
 }))

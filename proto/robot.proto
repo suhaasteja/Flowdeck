@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package robot;
+
+// ── Joint-level state ─────────────────────────────────────────────────────────
+
+message JointState {
+  repeated double positions = 1;   // 6 joint angles (rad)
+  repeated double velocities = 2;  // rad/s
+  repeated double efforts    = 3;  // Nm
+  bool gripper_closed        = 4;
+}
+
+// ── TCP pose ──────────────────────────────────────────────────────────────────
+
+message TcpPose {
+  double x  = 1;  // metres
+  double y  = 2;
+  double z  = 3;
+  double rx = 4;  // Euler angles (rad)
+  double ry = 5;
+  double rz = 6;
+}
+
+// ── Full robot state (30 Hz broadcast) ───────────────────────────────────────
+
+message RobotState {
+  JointState joints      = 1;
+  TcpPose    tcp         = 2;
+  string     status      = 3;  // "IDLE" | "MOVING" | "FAULTED" | "E_STOP"
+  int32      cycle_count = 4;
+  string     current_skill = 5;
+}
+
+// ── Fault event ───────────────────────────────────────────────────────────────
+
+message Fault {
+  string id          = 1;
+  string code        = 2;  // "JOINT_TORQUE_LIMIT" | "COLLISION_DETECTED" | ...
+  string message     = 3;
+  int32  joint_index = 4;  // 0-5, or -1 for system-level fault
+  double timestamp   = 5;  // Unix seconds
+}
+
+// Empty sentinel — signals that the active fault has been cleared.
+message FaultCleared {}
+
+// ── Server → Client ───────────────────────────────────────────────────────────
+
+message ServerMessage {
+  oneof payload {
+    RobotState   state         = 1;
+    Fault        fault         = 2;
+    FaultCleared fault_cleared = 3;
+  }
+}
+
+// ── Skill command ─────────────────────────────────────────────────────────────
+
+message SkillCommand {
+  string skill_id = 1;
+}
+
+// Empty sentinels for commands with no parameters.
+message EStop {}
+message Reset {}
+
+// ── Client → Server ───────────────────────────────────────────────────────────
+
+message ClientMessage {
+  oneof payload {
+    SkillCommand skill  = 1;
+    EStop        e_stop = 2;
+    Reset        reset  = 3;
+  }
+}
